@@ -103,9 +103,10 @@ python scripts/test_stream_client.py /path/to/audio.wav --chunk-ms 250
 
 ## Run automated tests
 
-After installing dependencies:
+After installing dev dependencies (which include `pytest`), for example:
 
 ```bash
+pip install -e .[dev]
 pytest
 ```
 
