@@ -7,7 +7,7 @@ from app.audio import pcm16le_to_float32_mono
 
 
 def test_pcm16le_to_float32_mono_decodes_expected_values() -> None:
-    pcm = np.array([-32768, 0, 32767], dtype=np.int16).tobytes()
+    pcm = np.array([-32768, 0, 32767], dtype="<i2").tobytes()
 
     decoded = pcm16le_to_float32_mono(pcm)
 
