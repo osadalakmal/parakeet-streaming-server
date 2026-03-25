@@ -14,7 +14,7 @@ def load_main_module(monkeypatch):
     return importlib.import_module("app.main")
 
 
-def test_parse_json_accepts_dict_payload(monkeypatch) -> None:
+def test_parse_json_accepts_dict_json(monkeypatch) -> None:
     main = load_main_module(monkeypatch)
     assert main._parse_json('{"type":"start"}') == {"type": "start"}
 
