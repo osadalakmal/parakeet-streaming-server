@@ -1,0 +1,29 @@
+[project]
+name = "parakeet-local-streaming-service"
+version = "0.1.0"
+description = "Tiny local streaming transcription service powered by parakeet-mlx"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  "fastapi>=0.115.0,<1.0.0",
+  "uvicorn[standard]>=0.30.0,<1.0.0",
+  "parakeet-mlx>=0.3.0",
+  "numpy>=2.0.0",
+  "websockets>=12.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "ruff>=0.6.0",
+  "pytest>=8.0.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["app"]
