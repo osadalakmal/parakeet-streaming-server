@@ -101,7 +101,6 @@ Run:
 python scripts/test_stream_client.py /path/to/audio.wav --chunk-ms 250
 ```
 
-
 ## Run automated tests
 
 After installing dependencies:
