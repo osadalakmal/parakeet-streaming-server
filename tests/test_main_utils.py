@@ -8,7 +8,8 @@ import types
 def load_main_module():
     fake_parakeet = types.ModuleType("parakeet_mlx")
     fake_parakeet.from_pretrained = lambda _name: object()
-    sys.modules.setdefault("parakeet_mlx", fake_parakeet)
+    sys.modules["parakeet_mlx"] = fake_parakeet
+    sys.modules.pop("app.main", None)
     return importlib.import_module("app.main")
 
 
