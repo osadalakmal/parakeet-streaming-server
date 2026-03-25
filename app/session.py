@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+import mlx.core as mx
 import numpy as np
 
 from app.audio import pcm16le_to_float32_mono
@@ -44,7 +45,7 @@ class StreamingSession:
 
         audio = pcm16le_to_float32_mono(chunk)
         if audio.size > 0:
-            self._transcriber.add_audio(audio)
+            self._transcriber.add_audio(mx.array(audio))
 
         return self._current_partial_payload()
 
@@ -53,7 +54,7 @@ class StreamingSession:
             raise RuntimeError("Session has not been started.")
 
         # Some streaming backends flush on empty audio chunks.
-        self._transcriber.add_audio(np.empty(0, dtype=np.float32))
+        self._transcriber.add_audio(mx.array(np.empty(0, dtype=np.float32)))
         return self._current_partial_payload()
 
     def stop(self) -> dict[str, str | bool]:
@@ -61,7 +62,7 @@ class StreamingSession:
             return {"type": "final", "text": self.finalized_text, "is_final": True}
 
         try:
-            self._transcriber.add_audio(np.empty(0, dtype=np.float32))
+            self._transcriber.add_audio(mx.array(np.empty(0, dtype=np.float32)))
             result = self._safe_result()
             final_text = self._extract_text(result)
             if final_text:
