@@ -101,6 +101,23 @@ Run:
 python scripts/test_stream_client.py /path/to/audio.wav --chunk-ms 250
 ```
 
+## Run automated tests
+
+After installing dev dependencies (which include `pytest`), for example:
+
+```bash
+pip install -e .[dev]
+pytest
+```
+
+## CI
+
+GitHub Actions workflow is included at `.github/workflows/ci.yml` and runs on every push/pull request:
+
+- Python 3.12
+- `pip install -e .[dev]`
+- `pytest`
+
 ## Obsidian plugin integration notes
 
 - Connect directly to `ws://127.0.0.1:8765/ws/transcribe` from the plugin process.
