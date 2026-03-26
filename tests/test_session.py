@@ -60,8 +60,7 @@ def test_streaming_session_start_and_partial_updates() -> None:
     second = session.add_pcm16_chunk(np.array([10, 20], dtype=np.int16).tobytes())
 
     assert model.kwargs == {
-        "sample_rate": 16_000,
-        "context_size": 128,
+        "context_size": (128, 128),
         "depth": 4,
         "keep_original_attention": True,
     }
