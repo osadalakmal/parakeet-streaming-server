@@ -32,6 +32,7 @@ class StreamingSession:
             raise RuntimeError("Session already started.")
 
         self._ctx = self._model.transcribe_stream(
+            sample_rate=self.config.sample_rate,
             context_size=(self.config.context_size, self.config.context_size),
             depth=self.config.depth,
             keep_original_attention=self.config.keep_original_attention,
