@@ -15,7 +15,7 @@ LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
 logging.basicConfig(level=logging.INFO, format=LOG_FORMAT)
 logger = logging.getLogger("parakeet_streaming_service")
 
-DEFAULT_MODEL = "mlx-community/parakeet-tdt-0.6b-v3"
+DEFAULT_MODEL = "mlx-community/parakeet-tdt-1.1b-v2"
 
 
 @asynccontextmanager
@@ -52,7 +52,7 @@ def debug_config() -> dict[str, Any]:
         "default_streaming": {
             "context_size": 256,
             "depth": 8,
-            "keep_original_attention": False,
+            "keep_original_attention": True,
         },
     }
 
@@ -83,7 +83,7 @@ async def ws_transcribe(websocket: WebSocket):
                         sample_rate=int(control.get("sample_rate", 16_000)),
                         context_size=int(control.get("context_size", 256)),
                         depth=int(control.get("depth", 8)),
-                        keep_original_attention=bool(control.get("keep_original_attention", False)),
+                        keep_original_attention=bool(control.get("keep_original_attention", True)),
                     )
                     if config.sample_rate != 16_000:
                         await websocket.send_json(
