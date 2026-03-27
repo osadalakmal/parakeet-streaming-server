@@ -15,7 +15,7 @@ LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
 logging.basicConfig(level=logging.INFO, format=LOG_FORMAT)
 logger = logging.getLogger("parakeet_streaming_service")
 
-DEFAULT_MODEL = "mlx-community/parakeet-tdt-1.1b-v2"
+DEFAULT_MODEL = "mlx-community/parakeet-tdt-1.1b"
 
 
 @asynccontextmanager
