@@ -13,7 +13,7 @@ class StreamConfig:
     sample_rate: int = 16_000
     context_size: int = 256
     depth: int = 8
-    keep_original_attention: bool = False
+    keep_original_attention: bool = True
 
 
 class StreamingSession:
