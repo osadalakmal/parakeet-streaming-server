@@ -1,13 +1,13 @@
 [project]
 name = "parakeet-local-streaming-service"
 version = "0.1.0"
-description = "Tiny local streaming transcription service powered by parakeet-mlx"
+description = "Tiny local streaming transcription service powered by mlx-whisper"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
   "fastapi>=0.115.0,<1.0.0",
   "uvicorn[standard]>=0.30.0,<1.0.0",
-  "parakeet-mlx>=0.3.0",
+  "mlx-whisper>=0.4.0",
   "numpy>=2.0.0",
   "websockets>=12.0",
 ]
@@ -24,6 +24,11 @@ testpaths = ["tests"]
 [build-system]
 requires = ["setuptools>=68.0"]
 build-backend = "setuptools.build_meta"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+]
 
 [tool.setuptools]
 packages = ["app"]

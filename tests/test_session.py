@@ -1,81 +1,125 @@
 from __future__ import annotations
 
+import sys
+import types
 import numpy as np
+import pytest
 
-from app.session import StreamConfig, StreamingSession
-
-
-class FakeResult:
-    def __init__(self) -> None:
-        self.text = ""
-        self.finalized_text = ""
-
-
-class FakeTranscriber:
-    def __init__(self) -> None:
-        self.result = FakeResult()
-        self._chunks = 0
-
-    def add_audio(self, audio: np.ndarray) -> None:
-        if audio.size == 0:
-            self.result.finalized_text = self.result.text
-            return
-
-        self._chunks += 1
-        self.result.text = f"chunk-{self._chunks}"
-        if self._chunks > 1:
-            self.result.finalized_text = f"chunk-{self._chunks - 1}"
+# ---------------------------------------------------------------------------
+# Stub out mlx_whisper so tests run without real model weights.
+# ---------------------------------------------------------------------------
+_fake_mlx_whisper = types.ModuleType("mlx_whisper")
+_call_count = 0
+_last_audio_size = 0
 
 
-class FakeContextManager:
-    def __init__(self, transcriber: FakeTranscriber) -> None:
-        self.transcriber = transcriber
-
-    def __enter__(self) -> FakeTranscriber:
-        return self.transcriber
-
-    def __exit__(self, exc_type, exc, tb) -> None:
-        return None
+def _fake_transcribe(audio, *, path_or_hf_repo="", **kwargs):
+    global _call_count, _last_audio_size
+    _call_count += 1
+    _last_audio_size = audio.size
+    return {"text": f"result-{_call_count}"}
 
 
-class FakeModel:
-    def __init__(self) -> None:
-        self.kwargs = None
-        self.transcriber = FakeTranscriber()
+_fake_mlx_whisper.transcribe = _fake_transcribe
+sys.modules.setdefault("mlx_whisper", _fake_mlx_whisper)
 
-    def transcribe_stream(self, **kwargs):
-        self.kwargs = kwargs
-        return FakeContextManager(self.transcriber)
+from app.session import StreamConfig, StreamingSession  # noqa: E402
 
 
-def test_streaming_session_start_and_partial_updates() -> None:
-    model = FakeModel()
-    session = StreamingSession(
-        model,
-        StreamConfig(sample_rate=16_000, context_size=128, depth=4, keep_original_attention=True),
-    )
+@pytest.fixture(autouse=True)
+def reset_counters():
+    global _call_count, _last_audio_size
+    _call_count = 0
+    _last_audio_size = 0
+    yield
 
+
+def _pcm(values: list[int]) -> bytes:
+    return np.array(values, dtype=np.int16).tobytes()
+
+
+def test_add_pcm16_chunk_returns_partial_without_transcribing() -> None:
+    session = StreamingSession("fake/model", StreamConfig())
     session.start()
-    first = session.add_pcm16_chunk(np.array([0, 10], dtype=np.int16).tobytes())
-    second = session.add_pcm16_chunk(np.array([10, 20], dtype=np.int16).tobytes())
 
-    assert model.kwargs == {
-        "context_size": (128, 128),
-        "depth": 4,
-        "keep_original_attention": True,
-    }
-    assert first["type"] == "partial"
-    assert first["text"] == "chunk-1"
-    assert second["finalized_text"] == "chunk-1"
+    payload = session.add_pcm16_chunk(_pcm([0, 100, 200]))
+
+    assert payload["type"] == "partial"
+    assert payload["is_final"] is False
+    # No transcription should have happened yet.
+    assert _call_count == 0
 
 
-def test_streaming_session_stop_returns_final_payload() -> None:
-    model = FakeModel()
-    session = StreamingSession(model, StreamConfig())
-
+def test_flush_triggers_transcription_and_returns_partial() -> None:
+    session = StreamingSession("fake/model", StreamConfig())
     session.start()
-    session.add_pcm16_chunk(np.array([1, 2], dtype=np.int16).tobytes())
+    session.add_pcm16_chunk(_pcm([1, 2]))
+    session.add_pcm16_chunk(_pcm([3, 4]))
 
-    final_payload = session.stop()
+    payload = session.flush()
 
-    assert final_payload == {"type": "final", "text": "chunk-1", "is_final": True}
+    assert payload["type"] == "partial"
+    assert payload["is_final"] is False
+    assert payload["text"] == "result-1"
+    assert _call_count == 1
+    # All buffered samples were passed to transcribe.
+    assert _last_audio_size == 4
+
+
+def test_stop_triggers_transcription_and_returns_final() -> None:
+    session = StreamingSession("fake/model", StreamConfig())
+    session.start()
+    session.add_pcm16_chunk(_pcm([10, 20]))
+
+    payload = session.stop()
+
+    assert payload == {"type": "final", "text": "result-1", "is_final": True}
+    assert _call_count == 1
+
+
+def test_stop_with_empty_buffer_returns_empty_final() -> None:
+    session = StreamingSession("fake/model", StreamConfig())
+    session.start()
+
+    payload = session.stop()
+
+    assert payload["type"] == "final"
+    assert payload["text"] == ""
+    assert _call_count == 0
+
+
+def test_language_and_beam_size_forwarded_to_transcribe(monkeypatch) -> None:
+    captured: dict = {}
+
+    def recording_transcribe(audio, *, path_or_hf_repo="", **kwargs):
+        captured.update(kwargs)
+        return {"text": "ok"}
+
+    monkeypatch.setattr(_fake_mlx_whisper, "transcribe", recording_transcribe)
+
+    config = StreamConfig(language="en", beam_size=8)
+    session = StreamingSession("fake/model", config)
+    session.start()
+    session.add_pcm16_chunk(_pcm([1, 2]))
+    session.flush()
+
+    assert captured.get("language") == "en"
+    assert captured.get("beam_size") == 8
+
+
+def test_beam_size_none_not_forwarded_to_transcribe(monkeypatch) -> None:
+    captured: dict = {}
+
+    def recording_transcribe(audio, *, path_or_hf_repo="", **kwargs):
+        captured.update(kwargs)
+        return {"text": "ok"}
+
+    monkeypatch.setattr(_fake_mlx_whisper, "transcribe", recording_transcribe)
+
+    config = StreamConfig(beam_size=None)
+    session = StreamingSession("fake/model", config)
+    session.start()
+    session.add_pcm16_chunk(_pcm([1, 2]))
+    session.flush()
+
+    assert "beam_size" not in captured
