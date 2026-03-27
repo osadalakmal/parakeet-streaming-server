@@ -13,7 +13,7 @@ from app.audio import pcm16le_to_float32_mono
 class StreamConfig:
     sample_rate: int = 16_000
     language: str | None = None  # None = auto-detect
-    beam_size: int = 5
+    beam_size: int | None = None  # None = greedy decoding (beam search not yet implemented in mlx_whisper)
 
 
 class StreamingSession:
@@ -77,7 +77,9 @@ class StreamingSession:
         if audio.size == 0:
             return
 
-        decode_options: dict[str, Any] = {"beam_size": self.config.beam_size}
+        decode_options: dict[str, Any] = {}
+        if self.config.beam_size is not None:
+            decode_options["beam_size"] = self.config.beam_size
         if self.config.language is not None:
             decode_options["language"] = self.config.language
 

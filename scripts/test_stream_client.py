@@ -20,7 +20,7 @@ def parse_args() -> argparse.Namespace:
         help="Chunk duration in milliseconds (recommended 200-500)",
     )
     parser.add_argument("--language", default=None, help="Language code (e.g. 'en'), or omit for auto-detect")
-    parser.add_argument("--beam-size", type=int, default=5)
+    parser.add_argument("--beam-size", type=int, default=None, help="Beam size for decoding (omit for greedy)")
     return parser.parse_args()
 
 

@@ -61,7 +61,7 @@ def debug_config() -> dict[str, Any]:
         "websocket": "/ws/transcribe",
         "default_streaming": {
             "language": None,
-            "beam_size": 5,
+            "beam_size": None,
         },
     }
 
@@ -88,10 +88,13 @@ async def ws_transcribe(websocket: WebSocket):
                     if session is not None:
                         session.close()
 
+                    raw_beam = control.get("beam_size")
+                    beam_size = int(raw_beam) if raw_beam is not None else None
+
                     config = StreamConfig(
                         sample_rate=int(control.get("sample_rate", 16_000)),
                         language=control.get("language") or None,
-                        beam_size=int(control.get("beam_size", 5)),
+                        beam_size=beam_size,
                     )
                     if config.sample_rate != 16_000:
                         await websocket.send_json(

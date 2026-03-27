@@ -105,3 +105,21 @@ def test_language_and_beam_size_forwarded_to_transcribe(monkeypatch) -> None:
 
     assert captured.get("language") == "en"
     assert captured.get("beam_size") == 8
+
+
+def test_beam_size_none_not_forwarded_to_transcribe(monkeypatch) -> None:
+    captured: dict = {}
+
+    def recording_transcribe(audio, *, path_or_hf_repo="", **kwargs):
+        captured.update(kwargs)
+        return {"text": "ok"}
+
+    monkeypatch.setattr(_fake_mlx_whisper, "transcribe", recording_transcribe)
+
+    config = StreamConfig(beam_size=None)
+    session = StreamingSession("fake/model", config)
+    session.start()
+    session.add_pcm16_chunk(_pcm([1, 2]))
+    session.flush()
+
+    assert "beam_size" not in captured
