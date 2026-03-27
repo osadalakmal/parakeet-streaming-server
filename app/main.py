@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+import os
 from contextlib import asynccontextmanager
 from typing import Any
 
+import mlx_whisper
+import numpy as np
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from parakeet_mlx import from_pretrained
 
 from app.session import StreamConfig, StreamingSession
 
@@ -15,19 +18,26 @@ LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
 logging.basicConfig(level=logging.INFO, format=LOG_FORMAT)
 logger = logging.getLogger("parakeet_streaming_service")
 
-DEFAULT_MODEL = "mlx-community/parakeet-tdt-1.1b"
+DEFAULT_MODEL = os.getenv("WHISPER_MODEL", "mlx-community/whisper-large-v3-turbo")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("Loading parakeet model: %s", DEFAULT_MODEL)
-    app.state.model = from_pretrained(DEFAULT_MODEL)
-    logger.info("Model loaded and warm.")
+    logger.info("Warming up Whisper model: %s", DEFAULT_MODEL)
+    # Run a silent dummy transcription so the model weights are loaded and
+    # compiled before the first real request arrives.
+    await asyncio.to_thread(
+        mlx_whisper.transcribe,
+        np.zeros(16_000, dtype=np.float32),
+        path_or_hf_repo=DEFAULT_MODEL,
+    )
+    app.state.model_path = DEFAULT_MODEL
+    logger.info("Model ready.")
     yield
     logger.info("Shutting down streaming service.")
 
 
-app = FastAPI(title="Parakeet Local Streaming Service", lifespan=lifespan)
+app = FastAPI(title="Whisper Local Streaming Service", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -50,9 +60,8 @@ def debug_config() -> dict[str, Any]:
         "audio_format": "PCM16LE mono, 16kHz",
         "websocket": "/ws/transcribe",
         "default_streaming": {
-            "context_size": 256,
-            "depth": 8,
-            "keep_original_attention": True,
+            "language": None,
+            "beam_size": 5,
         },
     }
 
@@ -81,9 +90,8 @@ async def ws_transcribe(websocket: WebSocket):
 
                     config = StreamConfig(
                         sample_rate=int(control.get("sample_rate", 16_000)),
-                        context_size=int(control.get("context_size", 256)),
-                        depth=int(control.get("depth", 8)),
-                        keep_original_attention=bool(control.get("keep_original_attention", True)),
+                        language=control.get("language") or None,
+                        beam_size=int(control.get("beam_size", 5)),
                     )
                     if config.sample_rate != 16_000:
                         await websocket.send_json(
@@ -94,7 +102,7 @@ async def ws_transcribe(websocket: WebSocket):
                         )
                         continue
 
-                    session = StreamingSession(websocket.app.state.model, config)
+                    session = StreamingSession(websocket.app.state.model_path, config)
                     session.start()
                     await websocket.send_json({"type": "started", "sample_rate": config.sample_rate})
 
@@ -102,7 +110,8 @@ async def ws_transcribe(websocket: WebSocket):
                     if session is None:
                         await websocket.send_json({"type": "error", "message": "Send start before flush."})
                         continue
-                    await websocket.send_json(session.flush())
+                    payload = await asyncio.to_thread(session.flush)
+                    await websocket.send_json(payload)
 
                 elif msg_type == "stop":
                     if session is None:
@@ -110,7 +119,8 @@ async def ws_transcribe(websocket: WebSocket):
                             {"type": "final", "text": "", "is_final": True}
                         )
                     else:
-                        await websocket.send_json(session.stop())
+                        payload = await asyncio.to_thread(session.stop)
+                        await websocket.send_json(payload)
                         session = None
 
                 else:

@@ -19,9 +19,8 @@ def parse_args() -> argparse.Namespace:
         default=250,
         help="Chunk duration in milliseconds (recommended 200-500)",
     )
-    parser.add_argument("--context-size", type=int, default=256)
-    parser.add_argument("--depth", type=int, default=8)
-    parser.add_argument("--keep-original-attention", action="store_true")
+    parser.add_argument("--language", default=None, help="Language code (e.g. 'en'), or omit for auto-detect")
+    parser.add_argument("--beam-size", type=int, default=5)
     return parser.parse_args()
 
 
@@ -68,9 +67,8 @@ async def stream_wav(args: argparse.Namespace) -> None:
                     {
                         "type": "start",
                         "sample_rate": sample_rate,
-                        "context_size": args.context_size,
-                        "depth": args.depth,
-                        "keep_original_attention": args.keep_original_attention,
+                        "language": args.language,
+                        "beam_size": args.beam_size,
                     }
                 )
             )
