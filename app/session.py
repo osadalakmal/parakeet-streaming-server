@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
-import mlx.core as mx
+import mlx_whisper
+import numpy as np
 
 from app.audio import pcm16le_to_float32_mono
 
@@ -11,102 +12,88 @@ from app.audio import pcm16le_to_float32_mono
 @dataclass(slots=True)
 class StreamConfig:
     sample_rate: int = 16_000
-    context_size: int = 256
-    depth: int = 8
-    keep_original_attention: bool = True
+    language: str | None = None  # None = auto-detect
+    beam_size: int | None = None  # None = greedy decoding (beam search not yet implemented in mlx_whisper)
 
 
 class StreamingSession:
-    """Owns one streaming transcriber context for a single websocket session."""
+    """Owns one Whisper transcription session for a single websocket connection.
 
-    def __init__(self, model: Any, config: StreamConfig):
-        self._model = model
+    Audio is buffered in memory.  Transcription runs on explicit flush/stop
+    so that the (blocking) Whisper call never happens on the hot audio path.
+    Callers are responsible for running flush() and stop() in a thread to
+    avoid blocking the asyncio event loop.
+    """
+
+    def __init__(self, model_path: str, config: StreamConfig) -> None:
+        self._model_path = model_path
         self.config = config
-        self._ctx = None
-        self._transcriber = None
-        self.finalized_text = ""
+        self._chunks: list[np.ndarray] = []
+        self._last_text: str = ""
+        self.finalized_text: str = ""
 
     def start(self) -> None:
-        if self._transcriber is not None:
-            raise RuntimeError("Session already started.")
+        # Nothing to set up; audio buffering starts on first add_pcm16_chunk call.
+        pass
 
-        self._ctx = self._model.transcribe_stream(
-            context_size=(self.config.context_size, self.config.context_size),
-            depth=self.config.depth,
-            keep_original_attention=self.config.keep_original_attention,
-        )
-        self._transcriber = self._ctx.__enter__()
-
-    def add_pcm16_chunk(self, chunk: bytes) -> dict[str, str | bool]:
-        if self._transcriber is None:
-            raise RuntimeError("Session has not been started.")
-
+    def add_pcm16_chunk(self, chunk: bytes) -> dict[str, Any]:
+        """Buffer the PCM chunk and return the last known partial transcript."""
         audio = pcm16le_to_float32_mono(chunk)
         if audio.size > 0:
-            self._transcriber.add_audio(mx.array(audio))
+            self._chunks.append(audio)
+        return self._partial_payload()
 
-        return self._current_partial_payload()
+    def flush(self) -> dict[str, Any]:
+        """Transcribe the current buffer and return a partial result.
 
-    def flush(self) -> dict[str, str | bool]:
-        if self._transcriber is None:
-            raise RuntimeError("Session has not been started.")
+        Blocking — run in a thread from the async layer.
+        """
+        self._run_transcription()
+        return self._partial_payload()
 
-        return self._current_partial_payload()
+    def stop(self) -> dict[str, Any]:
+        """Transcribe the current buffer and return the final result.
 
-    def stop(self) -> dict[str, str | bool]:
-        if self._transcriber is None:
-            return {"type": "final", "text": self.finalized_text, "is_final": True}
-
-        try:
-            result = self._safe_result()
-            final_text = self._extract_text(result)
-            if final_text:
-                self.finalized_text = final_text
-            return {"type": "final", "text": self.finalized_text, "is_final": True}
-        finally:
-            self.close()
+        Blocking — run in a thread from the async layer.
+        """
+        self._run_transcription()
+        self.finalized_text = self._last_text
+        return {"type": "final", "text": self.finalized_text, "is_final": True}
 
     def close(self) -> None:
-        if self._ctx is not None:
-            self._ctx.__exit__(None, None, None)
-        self._ctx = None
-        self._transcriber = None
+        self._chunks.clear()
 
-    def _current_partial_payload(self) -> dict[str, str | bool]:
-        result = self._safe_result()
-        text = self._extract_text(result)
-        finalized = self._extract_finalized_text(result)
-        if finalized:
-            self.finalized_text = finalized
-        elif text and text != self.finalized_text:
-            # Fallback if API does not expose a separate finalized text field.
-            self.finalized_text = text
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
 
+    def _get_audio(self) -> np.ndarray:
+        if not self._chunks:
+            return np.empty(0, dtype=np.float32)
+        return np.concatenate(self._chunks)
+
+    def _run_transcription(self) -> None:
+        audio = self._get_audio()
+        if audio.size == 0:
+            return
+
+        decode_options: dict[str, Any] = {}
+        if self.config.beam_size is not None:
+            decode_options["beam_size"] = self.config.beam_size
+        if self.config.language is not None:
+            decode_options["language"] = self.config.language
+
+        result = mlx_whisper.transcribe(
+            audio,
+            path_or_hf_repo=self._model_path,
+            **decode_options,
+        )
+        self._last_text = (result.get("text") or "").strip()
+
+    def _partial_payload(self) -> dict[str, Any]:
         return {
             "type": "partial",
-            "text": text,
+            "text": self._last_text,
             "finalized_text": self.finalized_text,
             "is_final": False,
         }
-
-    def _safe_result(self) -> Any:
-        return getattr(self._transcriber, "result", None)
-
-    @staticmethod
-    def _extract_text(result: Any) -> str:
-        if result is None:
-            return ""
-
-        text = getattr(result, "text", "")
-        return text if isinstance(text, str) else ""
-
-    @staticmethod
-    def _extract_finalized_text(result: Any) -> str:
-        if result is None:
-            return ""
-
-        for candidate in ("finalized_text", "final_text", "stable_text"):
-            value = getattr(result, candidate, "")
-            if isinstance(value, str) and value:
-                return value
-        return ""
