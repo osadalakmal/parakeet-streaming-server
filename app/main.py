@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
+import functools
 import json
 import logging
 import os
@@ -20,21 +22,38 @@ logger = logging.getLogger("parakeet_streaming_service")
 
 DEFAULT_MODEL = os.getenv("WHISPER_MODEL", "mlx-community/whisper-large-v3-turbo")
 
+# All mlx_whisper.transcribe() calls are routed through this single-thread
+# executor so that every Metal operation happens on the same OS thread.
+# MLX/Metal command-buffer completion handlers are thread-affine; using the
+# default asyncio thread pool (which can assign different threads for
+# successive calls) triggers the Metal assertion:
+#   _MTLCommandBuffer addCompletedHandler: failed assertion
+#   'Completed handler provided after commit call'
+_WHISPER_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
+    max_workers=1, thread_name_prefix="whisper"
+)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Warming up Whisper model: %s", DEFAULT_MODEL)
     # Run a silent dummy transcription so the model weights are loaded and
     # compiled before the first real request arrives.
-    await asyncio.to_thread(
-        mlx_whisper.transcribe,
-        np.zeros(16_000, dtype=np.float32),
-        path_or_hf_repo=DEFAULT_MODEL,
+    # Use the dedicated single-thread executor so Metal stays on one thread.
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(
+        _WHISPER_EXECUTOR,
+        functools.partial(
+            mlx_whisper.transcribe,
+            np.zeros(16_000, dtype=np.float32),
+            path_or_hf_repo=DEFAULT_MODEL,
+        ),
     )
     app.state.model_path = DEFAULT_MODEL
     logger.info("Model ready.")
     yield
     logger.info("Shutting down streaming service.")
+    _WHISPER_EXECUTOR.shutdown(wait=False)
 
 
 app = FastAPI(title="Whisper Local Streaming Service", lifespan=lifespan)
@@ -72,6 +91,7 @@ async def ws_transcribe(websocket: WebSocket):
     await websocket.send_json({"type": "ready"})
 
     session: StreamingSession | None = None
+    loop = asyncio.get_running_loop()
 
     try:
         while True:
@@ -113,7 +133,7 @@ async def ws_transcribe(websocket: WebSocket):
                     if session is None:
                         await websocket.send_json({"type": "error", "message": "Send start before flush."})
                         continue
-                    payload = await asyncio.to_thread(session.flush)
+                    payload = await loop.run_in_executor(_WHISPER_EXECUTOR, session.flush)
                     await websocket.send_json(payload)
 
                 elif msg_type == "stop":
@@ -122,7 +142,7 @@ async def ws_transcribe(websocket: WebSocket):
                             {"type": "final", "text": "", "is_final": True}
                         )
                     else:
-                        payload = await asyncio.to_thread(session.stop)
+                        payload = await loop.run_in_executor(_WHISPER_EXECUTOR, session.stop)
                         await websocket.send_json(payload)
                         session = None
 
