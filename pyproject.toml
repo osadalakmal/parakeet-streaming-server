@@ -1,5 +1,5 @@
 [project]
-name = "parakeet-local-streaming-service"
+name = "obsidian-voice-streaming-service"
 version = "0.1.0"
 description = "Tiny local streaming transcription service powered by mlx-whisper"
 readme = "README.md"

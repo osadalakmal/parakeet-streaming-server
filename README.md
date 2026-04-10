@@ -1,4 +1,4 @@
-# Parakeet Local Streaming Service (macOS Apple Silicon)
+# Obsidian Voice Streaming Service (macOS Apple Silicon)
 
 Tiny streaming-first local transcription service built on `parakeet-mlx` using its `transcribe_stream(...)` API (no existing wrapper used).
 

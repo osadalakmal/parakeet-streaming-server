@@ -16,7 +16,7 @@ from app.session import StreamConfig, StreamingSession
 
 LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
 logging.basicConfig(level=logging.INFO, format=LOG_FORMAT)
-logger = logging.getLogger("parakeet_streaming_service")
+logger = logging.getLogger("obsidian_voice_streaming_service")
 
 DEFAULT_MODEL = os.getenv("WHISPER_MODEL", "mlx-community/whisper-large-v3-turbo")
 
